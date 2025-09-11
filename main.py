@@ -3,16 +3,28 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import deque
 import time
+from datetime import datetime
 import pygame
 from game_env import SnakeEnv
 from model import Agent
+import glob
+import os
 
-def train(episodes=1000, render=False):
+def get_latest_model(models_dir="models", pattern="snake_model_*.pth"):
+    search_path = os.path.join(models_dir, pattern)
+    files = glob.glob(search_path)
+    if not files:
+        return None
+    latest_file = max(files, key=os.path.getctime)
+    return latest_file
+
+def train(episodes=1000, render=False, model_dir="models", plot_dir="plots"):
     """Train the DQN agent."""
     env = SnakeEnv(render=render)
     agent = Agent()
     scores = deque(maxlen=100)
     avg_scores = []
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     print(f"Training for {episodes} episodes...")
     for episode in range(episodes):
         state = env.reset()
@@ -32,8 +44,8 @@ def train(episodes=1000, render=False):
                 break
         scores.append(env.score)
         # Train the agent
-        if len(agent.memory) > 32:
-            agent.replay(32)
+        if len(agent.memory) > 64:
+            agent.replay(64)
         # Update target network every 100 episodes
         if episode % 100 == 0:
             agent.update_target_network()
@@ -43,9 +55,12 @@ def train(episodes=1000, render=False):
             avg_scores.append(avg_score)
             print(f"Episode {episode}, Average Score: {avg_score:.2f}, "
                   f"Epsilon: {agent.epsilon:.3f}, Steps: {steps}")
+    os.makedirs(model_dir, exist_ok=True)
+    os.makedirs(plot_dir, exist_ok=True)
     # Save the trained model
-    agent.save('snake_model.pth')
-    print("Model saved as 'snake_model.pth'")
+    model_filename = f"snake_model_{timestamp}.pth"
+    agent.save(model_filename)
+    print(f"Model saved as '{model_filename}'")
     # Plot training progress
     plt.figure(figsize=(10, 6))
     plt.plot(range(0, len(avg_scores) * 100, 100), avg_scores)
@@ -53,15 +68,19 @@ def train(episodes=1000, render=False):
     plt.xlabel('Episode')
     plt.ylabel('Average Score (last 100 episodes)')
     plt.grid(True)
-    plt.savefig('training_progress.png')
+    plot_filename = f"training_progress_{timestamp}.png"
+    plt.savefig(plot_filename)
     plt.show()
+    print(f"Training curve saved as '{plot_filename}'")
     env.close()
     return agent
 
-def play(model_path='snake_model.pth', num_games=5):
+def play(model_path=None, num_games=5):
     """Play the game with trained agent."""
     env = SnakeEnv(render=True)
     agent = Agent()
+    if model_path is None:
+        model_path = get_latest_model()
     try:
         agent.load(model_path)
         print(f"Loaded model from {model_path}")
@@ -100,10 +119,17 @@ def play(model_path='snake_model.pth', num_games=5):
         print(f"Best score: {max(scores)}")
     env.close()
 
-def evaluate(model_path='snake_model.pth', episodes=100):
-    """Evaluate the trained agent without rendering."""
+import os
+import json
+import numpy as np
+from datetime import datetime
+
+def evaluate(model_path=None, episodes=100, save_results=True, results_dir="results"):
+    """Evaluate the trained agent."""
     env = SnakeEnv(render=False)
     agent = Agent()
+    if model_path is None:
+        model_path = get_latest_model()
     try:
         agent.load(model_path)
         print(f"Loaded model from {model_path}")
@@ -122,24 +148,45 @@ def evaluate(model_path='snake_model.pth', episodes=100):
         if (episode + 1) % 20 == 0:
             avg_score = np.mean(scores[-20:])
             print(f"Episodes {episode - 19}-{episode}: Average Score: {avg_score:.2f}")
+    avg_score = float(np.mean(scores))
+    best_score = int(max(scores))
+    success_rate = float(sum(1 for s in scores if s > 0) / len(scores) * 100)
     print(f"\nEvaluation Results:")
-    print(f"Average Score: {np.mean(scores):.2f}")
-    print(f"Best Score: {max(scores)}")
-    print(f"Success Rate (score > 0): {sum(1 for s in scores if s > 0) / len(scores) * 100:.1f}%")
+    print(f"Average Score: {avg_score:.2f}")
+    print(f"Best Score: {best_score}")
+    print(f"Success Rate (score > 0): {success_rate:.1f}%")
+    # Save results
+    if save_results:
+        os.makedirs(results_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_file = os.path.join(results_dir, f"eval_{timestamp}.json")
+        results = {
+            "model": model_path,
+            "episodes": episodes,
+            "average_score": avg_score,
+            "best_score": best_score,
+            "success_rate": success_rate,
+            "scores": scores,
+            "timestamp": timestamp
+        }
+        with open(result_file, "w") as f:
+            json.dump(results, f, indent=4)
+        print(f"Results saved to {result_file}")
+    return avg_score, best_score, success_rate
 
 def main():
     parser = argparse.ArgumentParser(description='Simple Snake RL')
-    parser.add_argument('--mode', type=str, default='train', 
-                       choices=['train', 'play', 'eval'],
-                       help='Mode: train, play, or eval')
+    parser.add_argument('--mode', type=str, default='train',
+                        choices=['train', 'play', 'eval'],
+                        help='Mode: train, play, or eval')
     parser.add_argument('--episodes', type=int, default=1000,
-                       help='Number of episodes for training/evaluation')
-    parser.add_argument('--model', type=str, default='snake_model.pth',
-                       help='Model file path')
+                        help='Number of episodes for training/evaluation')
+    parser.add_argument('--model', type=str, default=None,
+                        help='Model file path (default: latest)')
     parser.add_argument('--render', action='store_true',
-                       help='Render during training (slower)')
+                        help='Render during training (slower)')
     parser.add_argument('--games', type=int, default=5,
-                       help='Number of games to play in play mode')
+                        help='Number of games to play in play mode')
     args = parser.parse_args()
     if args.mode == 'train':
         train(episodes=args.episodes, render=args.render)

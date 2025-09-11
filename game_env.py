@@ -34,31 +34,68 @@ class SnakeEnv:
                 break
     
     def step(self, action):
-        # Actions: 0=straight, 1=right turn, 2=left turn
+        old_head = self.snake[0]
+        old_dist = abs(old_head[0] - self.food[0]) + abs(old_head[1] - self.food[1])
         self.update_direction(action)
         self.move_snake()
-        reward = 0
-        done = False
-        # Check wall collision
+        
         head = self.snake[0]
-        if head[0] < 0 or head[0] >= self.width or head[1] < 0 or head[1] >= self.height:
-            reward = -10
+        new_dist = abs(head[0] - self.food[0]) + abs(head[1] - self.food[1])
+        
+        reward = 0.0
+        done = False
+        
+        # Check collisions first (terminal states)
+        if (head[0] < 0 or head[0] >= self.width or 
+            head[1] < 0 or head[1] >= self.height):
+            reward = -1.0
             done = True
             return self.get_state(), reward, done
-        # Check self collision
+            
         if head in list(self.snake)[1:]:
-            reward = -10
+            reward = -1.0
             done = True
             return self.get_state(), reward, done
-        # Check food
+
+        # Check if food is reachable - give penalty if not, but continue episode
+        if not self.is_food_reachable(head):
+            reward -= 0.5  # Penalty for unreachable food, but not terminal
+        
+        # Check if food is eaten
         if head == self.food:
-            reward = 10
+            reward += 15.0  # Reward for eating food
             self.score += 1
             self.place_food()
         else:
-            self.snake.pop()  # Remove tail if no food eaten
-            reward = -0.1  # Small penalty for each step
+            self.snake.pop()
+            # Small reward/penalty based on distance change
+            if new_dist < old_dist:
+                reward += 0.1  # Reward for moving closer to food
+            else:
+                reward -= 0.01  # Penalty for moving away from food
+        
+        # Small survival bonus per step
+        reward += 0.001
+        
         return self.get_state(), reward, done
+    
+    def is_food_reachable(self, head):
+        """Flood-fill from the snake's head to see if the bait is in the reachable zone."""
+        visited = set(map(tuple, self.snake))  # body is an obstacle
+        q = deque([tuple(head)])
+        steps = 0
+        while q:
+            x, y = q.popleft()
+            steps += 1
+            if (x, y) == tuple(self.food):
+                return True
+            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                nx, ny = x+dx, y+dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    if (nx, ny) not in visited:
+                        visited.add((nx, ny))
+                        q.append((nx, ny))
+        return False
     
     def update_direction(self, action):
         directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
@@ -99,10 +136,17 @@ class SnakeEnv:
         food_right = 1 if self.food[0] > head[0] else 0
         food_down = 1 if self.food[1] > head[1] else 0
         food_left = 1 if self.food[0] < head[0] else 0
+        # Distance to walls (normalized)
+        wall_left = head[0] / self.width
+        wall_right = (self.width - head[0] - 1) / self.width
+        wall_up = head[1] / self.height
+        wall_down = (self.height - head[1] - 1) / self.height
+        
         state = np.array([
             danger_left, danger_straight, danger_right,  # 3 danger signals
             dir_left, dir_up, dir_right, dir_down,       # 4 direction
-            food_left, food_up, food_right, food_down    # 4 food direction
+            food_left, food_up, food_right, food_down,   # 4 food direction
+            wall_left, wall_right, wall_up, wall_down    # 4 wall distances
         ], dtype=np.float32)
         return state
     

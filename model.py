@@ -5,10 +5,12 @@ import numpy as np
 from collections import deque
 
 class DQN(nn.Module):
-    def __init__(self, input_size=11, hidden_size=128, output_size=3):
+    def __init__(self, input_size=15, hidden_size=128, output_size=3):
         super(DQN, self).__init__()
         self.network = nn.Sequential(
             nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
@@ -19,18 +21,18 @@ class DQN(nn.Module):
         return self.network(x)
 
 class Agent:
-    def __init__(self, state_size=11, action_size=3, lr=0.001, gamma=0.95):
+    def __init__(self, state_size=15, action_size=3, lr=0.0001, gamma=0.99):
         self.state_size = state_size
         self.action_size = action_size
-        self.memory = deque(maxlen=10000)
+        self.memory = deque(maxlen=100000)
         self.epsilon = 1.0
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
+        self.epsilon_min = 0.005  # Increased from 0.05 to 0.1
+        self.epsilon_decay = 0.999
         self.gamma = gamma
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # Neural networks
-        self.q_network = DQN(state_size, 128, action_size).to(self.device)
-        self.target_network = DQN(state_size, 128, action_size).to(self.device)
+        self.q_network = DQN(state_size, 256, action_size).to(self.device)
+        self.target_network = DQN(state_size, 256, action_size).to(self.device)
         self.optimizer = torch.optim.Adam(self.q_network.parameters(), lr=lr)
         # Copy weights to target network
         self.update_target_network()
