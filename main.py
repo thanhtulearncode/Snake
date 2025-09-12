@@ -9,6 +9,7 @@ from game_env import SnakeEnv
 from model import Agent
 import glob
 import os
+import json
 
 def get_latest_model(models_dir="models", pattern="snake_model_*.pth"):
     search_path = os.path.join(models_dir, pattern)
@@ -58,7 +59,7 @@ def train(episodes=1000, render=False, model_dir="models", plot_dir="plots"):
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(plot_dir, exist_ok=True)
     # Save the trained model
-    model_filename = f"snake_model_{timestamp}.pth"
+    model_filename = os.path.join(model_dir, f"snake_model_{timestamp}.pth")
     agent.save(model_filename)
     print(f"Model saved as '{model_filename}'")
     # Plot training progress
@@ -68,7 +69,7 @@ def train(episodes=1000, render=False, model_dir="models", plot_dir="plots"):
     plt.xlabel('Episode')
     plt.ylabel('Average Score (last 100 episodes)')
     plt.grid(True)
-    plot_filename = f"training_progress_{timestamp}.png"
+    plot_filename = os.path.join(plot_dir, f"training_progress_{timestamp}.png")
     plt.savefig(plot_filename)
     plt.show()
     print(f"Training curve saved as '{plot_filename}'")
@@ -118,11 +119,6 @@ def play(model_path=None, num_games=5):
         print(f"Average score: {np.mean(scores):.2f}")
         print(f"Best score: {max(scores)}")
     env.close()
-
-import os
-import json
-import numpy as np
-from datetime import datetime
 
 def evaluate(model_path=None, episodes=100, save_results=True, results_dir="results"):
     """Evaluate the trained agent."""

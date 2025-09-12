@@ -38,45 +38,39 @@ class SnakeEnv:
         old_dist = abs(old_head[0] - self.food[0]) + abs(old_head[1] - self.food[1])
         self.update_direction(action)
         self.move_snake()
-        
         head = self.snake[0]
         new_dist = abs(head[0] - self.food[0]) + abs(head[1] - self.food[1])
-        
         reward = 0.0
         done = False
-        
         # Check collisions first (terminal states)
         if (head[0] < 0 or head[0] >= self.width or 
             head[1] < 0 or head[1] >= self.height):
             reward = -1.0
             done = True
             return self.get_state(), reward, done
-            
         if head in list(self.snake)[1:]:
             reward = -1.0
             done = True
             return self.get_state(), reward, done
-
-        # Check if food is reachable - give penalty if not, but continue episode
-        if not self.is_food_reachable(head):
-            reward -= 0.5  # Penalty for unreachable food, but not terminal
-        
+        # Check if food is reachable - reward if it becomes reachable again
+        is_reachable_now = self.is_food_reachable(head)
+        if not hasattr(self, 'was_reachable'):
+            self.was_reachable = True
+        if not self.was_reachable and is_reachable_now:
+            reward += 1.0  # Bonus for making food reachable again
+        self.was_reachable = is_reachable_now
         # Check if food is eaten
         if head == self.food:
-            reward += 15.0  # Reward for eating food
+            reward += 15.0
             self.score += 1
             self.place_food()
         else:
             self.snake.pop()
-            # Small reward/penalty based on distance change
-            if new_dist < old_dist:
-                reward += 0.1  # Reward for moving closer to food
-            else:
-                reward -= 0.01  # Penalty for moving away from food
-        
-        # Small survival bonus per step
+            # Distance-based reward with more meaningful scaling
+            dist_improvement = (old_dist - new_dist) / (self.width + self.height)  # Normalized
+            reward += dist_improvement * 2.0  # Scale up the distance reward
+        # Survival bonus
         reward += 0.001
-        
         return self.get_state(), reward, done
     
     def is_food_reachable(self, head):
@@ -141,7 +135,6 @@ class SnakeEnv:
         wall_right = (self.width - head[0] - 1) / self.width
         wall_up = head[1] / self.height
         wall_down = (self.height - head[1] - 1) / self.height
-        
         state = np.array([
             danger_left, danger_straight, danger_right,  # 3 danger signals
             dir_left, dir_up, dir_right, dir_down,       # 4 direction
