@@ -44,11 +44,11 @@ def train(episodes=1000, render=False, model_dir="models", plot_dir="plots"):
             if done:
                 break
         scores.append(env.score)
-        # Train the agent
-        if len(agent.memory) > 64:
-            agent.replay(64)
-        # Update target network every 100 episodes
-        if episode % 100 == 0:
+        # Train the agent 
+        if len(agent.memory) > 128:
+            agent.replay(128)  
+        # Update target network more frequently
+        if episode % 50 == 0:  
             agent.update_target_network()
         # Logging
         if episode % 100 == 0:
