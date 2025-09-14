@@ -3,13 +3,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import deque
 import time
-from datetime import datetime
 import pygame
 from game_env import SnakeEnv
 from model import Agent
 import glob
 import os
 import json
+
+from datetime import datetime
 
 def get_latest_model(models_dir="models", pattern="snake_model_*.pth"):
     search_path = os.path.join(models_dir, pattern)
@@ -19,24 +20,25 @@ def get_latest_model(models_dir="models", pattern="snake_model_*.pth"):
     latest_file = max(files, key=os.path.getctime)
     return latest_file
 
-def train(episodes=1000, render=False, model_dir="models", plot_dir="plots"):
+def train(episodes=15000, render=False, model_dir="models", plot_dir="plots"):
     """Train the DQN agent."""
     env = SnakeEnv(render=render)
     agent = Agent()
     scores = deque(maxlen=100)
     avg_scores = []
+    best_avg_score = 0
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     print(f"Training for {episodes} episodes...")
     for episode in range(episodes):
         state = env.reset()
-        total_score = 0
+        total_reward = 0
         steps = 0
         while True:
             action = agent.act(state)
             next_state, reward, done = env.step(action)
             agent.remember(state, action, reward, next_state, done)
             state = next_state
-            total_score += reward
+            total_reward += reward
             steps += 1
             if render:
                 env.render()
@@ -45,17 +47,24 @@ def train(episodes=1000, render=False, model_dir="models", plot_dir="plots"):
                 break
         scores.append(env.score)
         # Train the agent 
-        if len(agent.memory) > 128:
-            agent.replay(128)  
+        if len(agent.memory) > 1000:
+            agent.replay(64)
+        """
         # Update target network more frequently
         if episode % 50 == 0:  
             agent.update_target_network()
+        """
         # Logging
         if episode % 100 == 0:
             avg_score = np.mean(scores)
             avg_scores.append(avg_score)
-            print(f"Episode {episode}, Average Score: {avg_score:.2f}, "
-                  f"Epsilon: {agent.epsilon:.3f}, Steps: {steps}")
+            print(f"Episode {episode}, Avg Score: {avg_score:.2f}, "
+                  f"Best: {max(scores)}, Epsilon: {agent.epsilon:.3f}, "
+                  f"LR: {agent.scheduler.get_last_lr()[0]:.6f}")
+            if avg_score > best_avg_score:
+                best_avg_score = avg_score
+                best_model_filename = os.path.join(model_dir, f"best_snake_{timestamp}.pth")
+                agent.save(best_model_filename)
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(plot_dir, exist_ok=True)
     # Save the trained model

@@ -1,7 +1,8 @@
-import random
 import numpy as np
-import pygame
+import random
 from collections import deque
+import heapq
+import pygame
 
 class SnakeEnv:
     def __init__(self, width=12, height=12, render=False):
@@ -23,6 +24,7 @@ class SnakeEnv:
         self.direction = 'RIGHT'
         self.place_food()
         self.score = 0
+        self.steps_without_food = 0
         return self.get_state()
     
     def place_food(self):
@@ -32,45 +34,84 @@ class SnakeEnv:
             if [x, y] not in self.snake:
                 self.food = [x, y]
                 break
+
+    
+    def get_reachable_spaces(self, pos):
+        """BFS to count spaces reachable from position"""
+        visited = set(tuple(segment) for segment in self.snake)
+        if tuple(pos) in visited:
+            return 0
+        queue = deque([tuple(pos)])
+        visited.add(tuple(pos))
+        count = 0
+        while queue and count < 50:  # Limit to prevent excessive computation
+            x, y = queue.popleft()
+            count += 1
+            for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
+                nx, ny = x + dx, y + dy
+                if (0 <= nx < self.width and 0 <= ny < self.height and 
+                    (nx, ny) not in visited):
+                    visited.add((nx, ny))
+                    queue.append((nx, ny))
+        return min(count, 50)
     
     def step(self, action):
         old_head = self.snake[0]
         old_dist = abs(old_head[0] - self.food[0]) + abs(old_head[1] - self.food[1])
+        self.steps_without_food += 1
+        # Timeout penalty
+        if self.steps_without_food > self.width * self.height * 4:
+            return self.get_state(), -5.0, True
         self.update_direction(action)
         self.move_snake()
         head = self.snake[0]
         new_dist = abs(head[0] - self.food[0]) + abs(head[1] - self.food[1])
         reward = 0.0
         done = False
-        # Check collisions first (terminal states)
+        # Collision penalties
         if (head[0] < 0 or head[0] >= self.width or 
             head[1] < 0 or head[1] >= self.height):
-            reward = -2.0
+            reward = -10.0
             done = True
             return self.get_state(), reward, done
         if head in list(self.snake)[1:]:
-            reward = -2.0
+            reward = -10.0
             done = True
             return self.get_state(), reward, done
-        # Food eating reward
+        # Food consumption
         if head == self.food:
-            reward += 10.0
+            # Base food reward scales with snake length
+            base_reward = 10.0 + len(self.snake) * 0.5
+            reward += base_reward
             self.score += 1
+            self.steps_without_food = 0
             self.place_food()
-            # Additional reward based on snake length
-            reward += min(0.5, len(self.snake) * 0.05)
+            # Bonus for achieving milestones
+            if self.score >= 10:
+                reward += 5.0
+            if self.score >= 20:
+                reward += 10.0
+            if self.score >= 30:
+                reward += 20.0
         else:
             self.snake.pop()
-            # Distance-based reward with more meaningful scaling
-            dist_improvement = (old_dist - new_dist) / (self.width + self.height)
-            reward += dist_improvement * 3.0
-        # Survival bonus that increases with score
-        reward += 0.001 * (1 + self.score * 0.1)
-        # Bonus reward for high scores
-        if self.score >= 20:
-            reward += 0.1  # Add bonus for scores above 20
-        elif self.score >= 30:
-            reward += 0.2  # Add more bonus for scores above 30
+            # Distance-based reward (improved)
+            if new_dist < old_dist:
+                reward += 1.0  # Moving closer to food
+            elif new_dist > old_dist:
+                reward -= 0.5  # Moving away from food
+            # Small survival reward
+            reward += 0.1
+            # Space preservation reward
+            reachable_spaces = self.get_reachable_spaces(head)
+            if reachable_spaces >= 20:
+                reward += 0.5
+            elif reachable_spaces < 5:
+                reward -= 1.0  # Penalty for getting into tight spaces
+        # Perfect game bonus
+        if len(self.snake) == self.width * self.height:
+            reward += 500.0
+            done = True
         return self.get_state(), reward, done
     
     def is_food_reachable(self, head):
@@ -116,39 +157,81 @@ class SnakeEnv:
     
     def get_state(self):
         head = self.snake[0]
-        # Danger detection (wall or body collision)
+        # Basic danger detection (keep from original)
         danger_straight = self.is_danger(0)
         danger_right = self.is_danger(1)
         danger_left = self.is_danger(2)
-        # Direction one-hot encoding
+        # Direction encoding (keep from original)
         dir_up = 1 if self.direction == 'UP' else 0
         dir_right = 1 if self.direction == 'RIGHT' else 0
         dir_down = 1 if self.direction == 'DOWN' else 0
         dir_left = 1 if self.direction == 'LEFT' else 0
-        # Food direction relative to head
+        # Food direction (keep from original)
         food_up = 1 if self.food[1] < head[1] else 0
         food_right = 1 if self.food[0] > head[0] else 0
         food_down = 1 if self.food[1] > head[1] else 0
         food_left = 1 if self.food[0] < head[0] else 0
-        # Distance to walls (normalized)
+        # Enhanced space analysis - key improvement
+        next_positions = []
+        directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
+        current_idx = directions.index(self.direction)
+        for action in [2, 0, 1]:  # Left, Straight, Right
+            if action == 1:  # Right turn
+                new_idx = (current_idx + 1) % 4
+            elif action == 2:  # Left turn  
+                new_idx = (current_idx - 1) % 4
+            else:  # Straight
+                new_idx = current_idx
+            new_direction = directions[new_idx]
+            next_pos = head.copy()
+            if new_direction == 'UP':
+                next_pos[1] -= 1
+            elif new_direction == 'DOWN':
+                next_pos[1] += 1
+            elif new_direction == 'LEFT':
+                next_pos[0] -= 1
+            elif new_direction == 'RIGHT':
+                next_pos[0] += 1
+            next_positions.append(next_pos)
+        # Calculate reachable spaces for each action
+        space_left = self.get_reachable_spaces(next_positions[0]) / 50.0
+        space_straight = self.get_reachable_spaces(next_positions[1]) / 50.0  
+        space_right = self.get_reachable_spaces(next_positions[2]) / 50.0
+        # Wall distances (normalized)
         wall_left = head[0] / self.width
         wall_right = (self.width - head[0] - 1) / self.width
         wall_up = head[1] / self.height
         wall_down = (self.height - head[1] - 1) / self.height
-        # Snake length normalized
-        snake_length = len(self.snake) / (self.width * self.height)
-        # Food distance normalized
+        # Food distance components
         food_dist_x = (self.food[0] - head[0]) / self.width
         food_dist_y = (self.food[1] - head[1]) / self.height
+        food_dist_manhattan = (abs(self.food[0] - head[0]) + abs(self.food[1] - head[1])) / (self.width + self.height)
+        # Snake metrics
+        snake_length_norm = len(self.snake) / (self.width * self.height)
+        # Tail position relative to head
+        tail = self.snake[-1]
+        tail_dist_x = (tail[0] - head[0]) / self.width
+        tail_dist_y = (tail[1] - head[1]) / self.height
         state = np.array([
-            danger_left, danger_straight, danger_right,  # 3 danger signals
-            dir_left, dir_up, dir_right, dir_down,       # 4 direction
-            food_left, food_up, food_right, food_down,   # 4 food direction
-            wall_left, wall_right, wall_up, wall_down,   # 4 wall distances
-            snake_length,                                # snake length
-            food_dist_x, food_dist_y                     # 2 food distance
+            # Danger signals (3)
+            danger_left, danger_straight, danger_right,
+            # Current direction (4) 
+            dir_left, dir_up, dir_right, dir_down,
+            # Food direction (4)
+            food_left, food_up, food_right, food_down,
+            # Space analysis - KEY FEATURE (3)
+            space_left, space_straight, space_right,
+            # Wall distances (4)
+            wall_left, wall_right, wall_up, wall_down,
+            # Food distance metrics (3)
+            food_dist_x, food_dist_y, food_dist_manhattan,
+            # Snake metrics (1)
+            snake_length_norm,
+            # Tail tracking (2)
+            tail_dist_x, tail_dist_y
         ], dtype=np.float32)
         return state
+
     
     def is_danger(self, action):
         # Get next head position for given action
