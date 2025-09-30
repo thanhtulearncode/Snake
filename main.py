@@ -63,10 +63,10 @@ def train(episodes=5000, render=False, model_dir="models", plot_dir="plots"):
         scores.append(env.score)
         
         # Train the agent multiple times per episode for faster learning
-        if len(agent.memory) > 1000:
-            num_trainings = min(4, len(agent.memory) // 1000)
-            for _ in range(num_trainings):
-                agent.replay(128)
+        if len(agent.replay_buffer) > 2000:
+            if episode % 2 == 0:
+                for _ in range(4):
+                    agent.replay(batch_size=256)
         
         # Progress logging every 50 episodes
         if episode % 50 == 0 and episode > 0:
