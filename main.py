@@ -316,7 +316,7 @@ def benchmark():
             state = next_state
             if done:
                 break
-        if len(agent.memory) > 100:
+        if len(agent.replay_buffer) > 100:
             agent.replay(32)
     
     # Actual benchmark
@@ -342,7 +342,7 @@ def benchmark():
         total_steps += episode_steps
         
         # Train periodically
-        if len(agent.memory) > 500 and episode % 5 == 0:
+        if len(agent.replay_buffer) > 500 and episode % 5 == 0:
             agent.replay(32)
     
     benchmark_time = time.time() - start_time

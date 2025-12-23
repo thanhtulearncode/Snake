@@ -58,15 +58,9 @@ class Agent:
         try:
             if hasattr(torch, "compile") and self.device.type == "cuda":
                 # compile available and running on CUDA -> attempt compile for speedups
-                compiled = torch.compile(self._raw_q_network)
-                self.q_network = compiled
-            else:
-                # Skip compile on CPU (common on Windows without cl.exe)
-                self.q_network = self._raw_q_network
+                self.q_network = torch.compile(self.q_network)
         except Exception as e:
-            # Fallback: keep raw module and warn
             print(f"[warning] torch.compile failed or skipped: {e}")
-            self.q_network = self._raw_q_network
 
         # optimizer / scheduler / scaler unchanged
         self.optimizer = torch.optim.Adam(self.q_network.parameters(), lr=lr, weight_decay=1e-5)
@@ -108,9 +102,24 @@ class Agent:
 
     def act(self, state, training=True):
         if training and np.random.random() <= self.epsilon:
-            return random.randrange(self.action_size)
+            # state[0]=Left, state[1]=Straight, state[2]=Right
+            # actions: 0=Straight, 1=Right, 2=Left
+            danger_left = state[0]
+            danger_straight = state[1]
+            danger_right = state[2]
+            # identify safe actions (where danger is 0)
+            safe_actions = []
+            if danger_straight < 0.5: safe_actions.append(0)
+            if danger_right < 0.5:    safe_actions.append(1)
+            if danger_left < 0.5:     safe_actions.append(2)
+            # if we have safe moves, pick one random safe move
+            if len(safe_actions) > 0:
+                return random.choice(safe_actions)
+            else:
+                # if all moves look dangerous, just pick any (inevitable death)
+                return random.randrange(self.action_size)
 
-        # faster tensor creation
+        # Greedy Action (Neural Network)
         with torch.no_grad():
             state_t = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
             q_values = self.q_network(state_t)

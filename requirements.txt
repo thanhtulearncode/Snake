@@ -1,5 +1,7 @@
+numba
 numpy
 matplotlib
 pygame
 torch
 tensorboard
+

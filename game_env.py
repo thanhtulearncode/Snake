@@ -2,6 +2,45 @@ import numpy as np
 import random
 from collections import deque
 import pygame
+from numba import njit
+
+@njit(fastmath=True)
+def fast_bfs(start_x, start_y, width, height, grid, max_count):
+    # 0 = empty, 1 = occupied
+    if start_x < 0 or start_x >= width or start_y < 0 or start_y >= height:
+        return 0
+    if grid[start_x, start_y] == 1:
+        return 0
+    # Fixed-size queue for speed (simulating deque)
+    queue_x = np.empty(width * height, dtype=np.int32)
+    queue_y = np.empty(width * height, dtype=np.int32)
+    # Visited mask (to avoid modifying the actual grid)
+    visited = np.zeros_like(grid)
+    # Init 
+    head = 0
+    tail = 0
+    queue_x[tail] = start_x
+    queue_y[tail] = start_y
+    tail += 1
+    visited[start_x, start_y] = 1
+    count = 0
+    dx = np.array([1, -1, 0, 0])
+    dy = np.array([0, 0, 1, -1])
+    while head < tail and count < max_count:
+        cx = queue_x[head]
+        cy = queue_y[head]
+        head += 1
+        count += 1
+        for i in range(4):
+            nx = cx + dx[i]
+            ny = cy + dy[i]
+            if (0 <= nx < width and 0 <= ny < height and 
+                grid[nx, ny] == 0 and visited[nx, ny] == 0):
+                visited[nx, ny] = 1
+                queue_x[tail] = nx
+                queue_y[tail] = ny
+                tail += 1
+    return min(count, max_count)
 
 class SnakeEnv:
     def __init__(self, width=12, height=12, render=False):
@@ -28,6 +67,7 @@ class SnakeEnv:
         # Cache for direction calculations
         self.direction_map = {'UP': 0, 'RIGHT': 1, 'DOWN': 2, 'LEFT': 3}
         self.directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
+        self.grid = np.zeros((width, height), dtype=np.int8)
         self.reset()
     
     def reset(self):
@@ -36,6 +76,9 @@ class SnakeEnv:
         self.snake = deque([[center_x, center_y]])
         # Track occupied cells for O(1) collision checks and fast food placement
         self.occupied = {(center_x, center_y)}
+        # Reset grid
+        self.grid.fill(0)                            
+        self.grid[center_x, center_y] = 1
         self.direction = 'RIGHT'
         self.place_food()
         self.score = 0
@@ -52,28 +95,14 @@ class SnakeEnv:
             self.food = [0, 0]
 
     def get_reachable_spaces(self, pos):
-        """Optimized BFS to count spaces reachable from position"""
-        # Quick rejects
-        if not (0 <= pos[0] < self.width and 0 <= pos[1] < self.height):
-            return 0
-        if (pos[0], pos[1]) in self.occupied:
-            return 0
-        visited = set(self.occupied)
-        queue = deque([tuple(pos)])
-        visited.add(tuple(pos))
-        count = 0
-        # Pre-define directions to avoid repeated list creation
-        directions = [(0,1), (0,-1), (1,0), (-1,0)]
-        while queue and count < 50:  # Limit to prevent excessive computation
-            x, y = queue.popleft()
-            count += 1
-            for dx, dy in directions:
-                nx, ny = x + dx, y + dy
-                if (0 <= nx < self.width and 0 <= ny < self.height and 
-                    (nx, ny) not in visited):
-                    visited.add((nx, ny))
-                    queue.append((nx, ny))
-        return min(count, 50)
+        return fast_bfs(
+        int(pos[0]), 
+        int(pos[1]), 
+        self.width, 
+        self.height, 
+        self.grid, 
+        50
+        )
     
     def step(self, action):
         old_head = self.snake[0]
@@ -95,46 +124,37 @@ class SnakeEnv:
         # Commit move
         self.snake.appendleft(head)
         self.occupied.add((head[0], head[1]))
+        self.grid[head[0], head[1]] = 1
         new_dist = abs(head[0] - self.food[0]) + abs(head[1] - self.food[1])
         reward = 0.0
         done = False
         # Food consumption - restored more nuanced rewards
+        length_ratio = len(self.snake) / (self.width * self.height)
+        reward = 0.0
+        reward += 0.01 # Survival Reward (Small constant)
         if head == self.food:
-            # Base food reward scales with snake length
-            base_reward = 10.0 + len(self.snake) * 0.75
-            reward += base_reward
+            reward += 1.0 + length_ratio
             self.score += 1
             self.steps_without_food = 0
             self.place_food()
-            # Progressive milestone bonuses
-            if self.score >= 10:
-                reward += 8.0
-            if self.score >= 20:
-                reward += 15.0
-            if self.score >= 30:
-                reward += 25.0
-            if self.score >= 40:
-                reward += 40.0
         else:
             tail = self.snake.pop()
             self.occupied.discard((tail[0], tail[1]))
-            # Balanced movement rewards
-            if new_dist < old_dist:
-                reward += 0.8  # Moving closer to food
-            elif new_dist > old_dist:
-                reward -= 0.4  # Moving away from food
-            # Small survival reward
-            reward += 0.15
-            # Restored space preservation logic with balanced thresholds
-            if len(self.snake) > 4:  # Only check space when snake is reasonably long
-                reachable_spaces = self.get_reachable_spaces(head)
-                if reachable_spaces >= 25:
-                    reward += 0.6  # Good space preservation
-                elif reachable_spaces >= 15:
-                    reward += 0.3  # Moderate space
-                elif reachable_spaces < 8:
-                    reward -= 1.2  # Penalty for tight spaces
-        return self.get_state(), reward, done
+            self.grid[tail[0], tail[1]] = 0
+            if len(self.snake) < 15:
+                if new_dist < old_dist:
+                    reward += 0.05
+                else:
+                    reward -= 0.05
+            if len(self.snake) > 10:
+                reachable = self.get_reachable_spaces(head)
+                if reachable < len(self.snake): # If trapped in space smaller than body
+                    reward -= 0.5
+        if done:
+            penalty = 1.0 + (len(self.snake) / 10.0)
+            return self.get_state(), -penalty, True
+            
+        return self.get_state(), reward, False
     
     def update_direction(self, action):
         current_idx = self.direction_map[self.direction]

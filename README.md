@@ -12,7 +12,7 @@ A reinforcement learning implementation of the classic Snake game using Deep Q-N
 
 ## Performance
 
-Average score: ~28 | Best: 41+ | Success rate: 100%
+Average score: ~43 | Best: 80+ | Success rate: 100%
 
 ## Installation
 
